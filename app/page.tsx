@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 // ============================================================================
 // [타입 정의] 제품 분석 데이터 인터페이스
@@ -55,6 +55,44 @@ export default function VideoProductAnalyzer() {
   // 클립보드 복사 성공 알림
   const [copySuccess, setCopySuccess] = useState(false);
 
+  // ── API 키 설정 관련 상태 ──
+  // API 설정 모달 열림/닫힘
+  const [isSettingOpen, setIsSettingOpen] = useState(false);
+  // 현재 저장된 API 키 (브라우저 로컬스토리지에서 불러옴)
+  const [apiKey, setApiKey] = useState("");
+  // 모달 안의 API 키 입력창 임시 값
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  // API 키 저장 완료 메시지 표시 여부
+  const [apiKeySaved, setApiKeySaved] = useState(false);
+  // API 키 입력창 비밀번호 표시/숨김
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  // 페이지 처음 로드 시 로컬스토리지에서 API 키 불러오기
+  useEffect(() => {
+    const savedKey = localStorage.getItem("gemini_api_key") || "";
+    setApiKey(savedKey);
+    setApiKeyInput(savedKey);
+  }, []);
+
+  // API 키 저장 핸들러
+  const handleSaveApiKey = () => {
+    const trimmed = apiKeyInput.trim();
+    localStorage.setItem("gemini_api_key", trimmed);
+    setApiKey(trimmed);
+    setApiKeySaved(true);
+    setTimeout(() => {
+      setApiKeySaved(false);
+      setIsSettingOpen(false);
+    }, 1500);
+  };
+
+  // API 키 삭제 핸들러
+  const handleDeleteApiKey = () => {
+    localStorage.removeItem("gemini_api_key");
+    setApiKey("");
+    setApiKeyInput("");
+  };
+
   // 1. 영상 분석 요청 핸들러
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,10 +111,11 @@ export default function VideoProductAnalyzer() {
         setLoadingStep("AI가 영상 속 제품과 타임스탬프를 스캔 중입니다...");
       }, 1200);
 
+      // API 키를 함께 전송 (서버에서 이 키를 이용해 Gemini API 호출)
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoUrl: videoUrl.trim() }),
+        body: JSON.stringify({ videoUrl: videoUrl.trim(), apiKey: apiKey || undefined }),
       });
 
       clearTimeout(timer);
@@ -100,7 +139,7 @@ export default function VideoProductAnalyzer() {
     }
   };
 
-  // 2. 예시 링크 자동 채우기 함수 (처음 사용하는 사용자를 위한 편리한 버튼)
+  // 2. 예시 링크 자동 채우기 함수
   const handleSampleFill = (sampleUrl: string) => {
     setVideoUrl(sampleUrl);
     setErrorMessage(null);
@@ -109,7 +148,6 @@ export default function VideoProductAnalyzer() {
   // 3. 타임스탬프 클릭 시 영상 해당 시간대로 이동
   const handleJumpToTime = (seconds: number) => {
     setActiveSeconds(seconds);
-    // 영상 플레이어로 스크롤 부드럽게 이동
     const playerEl = document.getElementById("video-player-section");
     if (playerEl) {
       playerEl.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -163,17 +201,124 @@ export default function VideoProductAnalyzer() {
               <p className="logo-sub">영상 속 제품 AI 자동 감지 & 쇼핑 스캐너</p>
             </div>
           </div>
-          <div className="badge-cloudflare">
-            <span className="dot-green"></span>
-            Cloudflare Pages 배포 지원
+          <div className="header-right">
+            {/* API 키 상태 표시 및 설정 버튼 */}
+            <button
+              onClick={() => {
+                setApiKeyInput(apiKey);
+                setIsSettingOpen(true);
+              }}
+              className={`api-setting-btn ${apiKey ? "has-key" : "no-key"}`}
+              title="Gemini API 키 설정"
+            >
+              {apiKey ? (
+                <>
+                  <span className="dot-green"></span>
+                  API 키 설정됨 ⚙️
+                </>
+              ) : (
+                <>
+                  <span className="dot-red"></span>
+                  API 키 없음 ⚙️
+                </>
+              )}
+            </button>
+            <div className="badge-cloudflare">
+              <span className="dot-green"></span>
+              Cloudflare 배포 지원
+            </div>
           </div>
         </div>
       </header>
+
+      {/* ======================= API 키 설정 모달 ======================= */}
+      {isSettingOpen && (
+        <div className="modal-overlay" onClick={() => setIsSettingOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">🔑 Gemini API 키 설정</h2>
+              <button className="modal-close" onClick={() => setIsSettingOpen(false)}>✕</button>
+            </div>
+
+            <div className="modal-body">
+              <p className="modal-desc">
+                Google Gemini API 키를 입력하시면 영상 속 제품을 실제 AI로 정밀 분석합니다.
+                <br />
+                API 키는 이 기기의 브라우저에만 안전하게 저장되며, 외부로 절대 전송되지 않습니다.
+              </p>
+
+              {/* API 키 발급 안내 링크 */}
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="api-guide-link"
+              >
+                🌐 Google AI Studio에서 무료 API 키 발급받기 →
+              </a>
+
+              {/* API 키 입력창 */}
+              <div className="api-input-wrapper">
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="AIzaSy... 형태의 API 키를 붙여넣으세요"
+                  className="api-key-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="show-key-btn"
+                  title={showApiKey ? "숨기기" : "보이기"}
+                >
+                  {showApiKey ? "🙈" : "👁️"}
+                </button>
+              </div>
+
+              {/* 현재 저장된 키 상태 표시 */}
+              {apiKey && (
+                <div className="saved-key-status">
+                  <span>✅ 저장된 키: {apiKey.slice(0, 8)}•••{apiKey.slice(-4)}</span>
+                  <button onClick={handleDeleteApiKey} className="delete-key-btn">
+                    🗑️ 삭제
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button onClick={() => setIsSettingOpen(false)} className="modal-cancel-btn">
+                취소
+              </button>
+              <button onClick={handleSaveApiKey} className="modal-save-btn">
+                {apiKeySaved ? "✅ 저장 완료!" : "💾 저장하기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ======================= 메인 콘텐츠 본문 ======================= */}
       <main className="main-content">
         {/* 히어로 & 입력 폼 영역 */}
         <section className="hero-section">
+          {/* API 키 미설정 안내 배너 */}
+          {!apiKey && (
+            <div className="api-warn-banner">
+              <span>⚠️</span>
+              <span>
+                Gemini API 키가 없습니다. 지금은 <strong>데모 모드</strong>로 작동합니다.{" "}
+                <button
+                  onClick={() => setIsSettingOpen(true)}
+                  className="inline-setting-link"
+                >
+                  API 키 설정하기 →
+                </button>
+              </span>
+            </div>
+          )}
+
           <h2 className="hero-heading">
             영상 링크만 넣으면, <br />
             <span className="gradient-text">AI가 영상 속 모든 제품</span>을 찾아드립니다
@@ -260,9 +405,14 @@ export default function VideoProductAnalyzer() {
               <div className="notice-banner">
                 <span className="notice-icon">💡</span>
                 <div className="notice-text">
-                  <strong>체험 데모 모드 작동 중:</strong> Cloudflare 대시보드 또는
-                  로컬 파일에 <code>GEMINI_API_KEY</code>를 등록하시면 실제 실시간 AI
-                  분석으로 전환됩니다.
+                  <strong>체험 데모 모드 작동 중:</strong>{" "}
+                  <button
+                    onClick={() => setIsSettingOpen(true)}
+                    className="inline-setting-link"
+                  >
+                    API 키를 설정
+                  </button>
+                  하시면 실제 실시간 AI 분석으로 즉시 전환됩니다.
                 </div>
               </div>
             )}

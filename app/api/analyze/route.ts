@@ -172,11 +172,14 @@ function generateDemoAnalysis(videoTitle: string, videoId: string) {
   };
 }
 
-// 5. POST 요청 처리 (클라이언트에서 영상 URL을 전달받음)
+// 5. POST 요청 처리 (클라이언트에서 영상 URL과 API 키를 전달받음)
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { videoUrl } = body as { videoUrl?: string };
+    const { videoUrl, apiKey: clientApiKey } = body as {
+      videoUrl?: string;
+      apiKey?: string;
+    };
 
     if (!videoUrl || typeof videoUrl !== "string") {
       return NextResponse.json(
@@ -204,10 +207,12 @@ export async function POST(request: Request) {
       thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
     };
 
-    // 환경 변수에서 Gemini API 키 확인 (Cloudflare 대시보드 또는 .env.local)
-    const apiKey = process.env.GEMINI_API_KEY;
+    // API 키 우선순위:
+    // 1순위: 앱 화면에서 사용자가 직접 입력한 키 (clientApiKey)
+    // 2순위: 서버 환경변수에 등록된 키 (GEMINI_API_KEY)
+    const apiKey = (clientApiKey && clientApiKey.trim()) || process.env.GEMINI_API_KEY;
 
-    // API 키가 아직 등록되지 않았을 경우, 남건께서 UI와 기능을 즉시 확인하실 수 있도록 데모 데이터를 반환
+    // API 키가 어디에도 없을 경우 데모 데이터 반환
     if (!apiKey) {
       const demoData = generateDemoAnalysis(metadata.title, videoId);
       demoData.video = {

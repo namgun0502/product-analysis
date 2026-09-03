@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <!-- 모바일 환경에서도 화면이 깨지지 않고 잘 보이도록 설정합니다. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>남건의 기본 웹 앱</title>
+    
+    <!-- 구글에서 제공하는 깔끔하고 읽기 편한 폰트(Inter)를 가져옵니다. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- 우리가 꾸며줄 디자인 파일(style.css)을 불러옵니다. -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- 화면 전체를 감싸는 중앙 정렬 컨테이너입니다. -->
+    <div class="app-container">
+        <header class="app-header">
+            <h1>안녕하세요, 남건! 👋</h1>
+            <p>HTML, CSS, JavaScript로 만든 기본 뼈대 앱입니다.</p>
+        </header>
+
+        <!-- 핵심 내용을 담는 카드 레이아웃입니다. -->
+        <main class="app-content">
+            <div class="card">
+                <h2>실시간 인터랙션 테스트</h2>
+                <p>아래 버튼을 누르면 자바스크립트(app.js) 파일과 연결되어 숫자가 올라갑니다.</p>
+                
+                <!-- 숫자가 변하는 곳입니다. (id가 counter인 요소) -->
+                <div class="counter-display">
+                    클릭 횟수: <span id="counter">0</span>번
+                </div>
+
+                <!-- 사용자가 누를 수 있는 세련된 버튼입니다. -->
+                <button id="click-btn" class="primary-btn">
+                    클릭해보세요!
+                </button>
+            </div>
+        </main>
+
+        <!-- 화면 하단에 저작권 또는 제작자 정보를 표시합니다. -->
+        <footer class="app-footer">
+            <p>© 2026 남건. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <!-- 기능 동작을 담당하는 자바스크립트 파일(app.js)을 불러옵니다. -->
+    <script src="app.js"></script>
+</body>
+</html>

@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 
 // ============================================================================
 // [API 설명] 제니트리 JT_ProductLens 영상 제품 분석 백엔드 엔드포인트
-// - 최신 Gemini 2.5 Flash / 2.0 Flash / 1.5 Flash 전 세대 모델 지능형 자동 감지
-// - 유튜브 영상 프레임(고화질 썸네일)을 실시간으로 가져와 멀티모달 비전 AI로 분석
+// - 구글 ModelService.ListModels를 실시간 조회하여 사용자의 API 키에서 지원하는
+//   실제 모델명(models/...)을 100% 정확하게 동적 탐색하여 호출 (Model Not Found 완전 방지)
+// - 유튜브 영상 고화질 프레임 썸네일을 base64 멀티모달(Vision)로 전달하여 정밀 판독
 // - 클라우드플레어(Cloudflare) 엣지 환경과 100% 호환
 // ============================================================================
 
@@ -88,7 +89,76 @@ function parseTimestampToSeconds(ts: string): number {
   return 0;
 }
 
-// 5. API 키가 전혀 등록되지 않은 초보자 체험용 데모 시뮬레이션 데이터
+// 5. 구글 ListModels API를 호출하여 현재 API 키에서 실제 지원하는 최적의 모델 경로 조회
+async function resolveOptimalModel(apiKey: string): Promise<{
+  modelPath: string;
+  displayName: string;
+  error?: string;
+}> {
+  try {
+    const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+    const listRes = await fetch(listUrl);
+
+    if (!listRes.ok) {
+      const errText = await listRes.text();
+      let msg = "API 키 인증 실패";
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed?.error?.message) msg = parsed.error.message;
+      } catch {}
+      return { modelPath: "", displayName: "", error: msg };
+    }
+
+    const data = (await listRes.json()) as any;
+    const models: any[] = data?.models || [];
+
+    // generateContent를 지원하는 유효한 모델들 필터링
+    const contentModels = models.filter((m) =>
+      m?.supportedGenerationMethods?.includes("generateContent")
+    );
+
+    if (contentModels.length === 0) {
+      return {
+        modelPath: "",
+        displayName: "",
+        error: "해당 API 키에서 콘텐츠 생성을 지원하는 모델을 찾을 수 없습니다.",
+      };
+    }
+
+    // 우선순위 키워드 순으로 가장 우수한 최신 플래시 모델 선택
+    const priorityKeywords = [
+      "2.5-flash",
+      "2.0-flash",
+      "1.5-flash",
+      "flash",
+      "2.5-pro",
+      "1.5-pro",
+      "pro",
+    ];
+
+    for (const kw of priorityKeywords) {
+      const matched = contentModels.find((m) =>
+        m.name?.toLowerCase().includes(kw)
+      );
+      if (matched) {
+        return {
+          modelPath: matched.name, // 예: "models/gemini-1.5-flash"
+          displayName: matched.displayName || matched.name,
+        };
+      }
+    }
+
+    // 우선순위에 정확히 안 걸려도 사용 가능한 첫 번째 생성 모델 선택
+    return {
+      modelPath: contentModels[0].name,
+      displayName: contentModels[0].displayName || contentModels[0].name,
+    };
+  } catch (err: any) {
+    return { modelPath: "", displayName: "", error: err.message };
+  }
+}
+
+// 6. API 키가 전혀 등록되지 않은 초보자 체험용 데모 시뮬레이션 데이터
 function generateDemoAnalysis(videoTitle: string, videoId: string) {
   return {
     success: true,
@@ -133,26 +203,11 @@ function generateDemoAnalysis(videoTitle: string, videoId: string) {
           google: "Oversized wool blazer oatmeal",
         },
       },
-      {
-        id: "prod-3",
-        name: "로지텍 MX Master 3S 무소음 무선 마우스",
-        brand: "Logitech",
-        category: "전자기기",
-        timestamp: "01:10",
-        timestampSeconds: 70,
-        description:
-          "인체공학적 디자인의 그라파이트 블랙 마우스. 작업 공간에서 확인됩니다.",
-        searchKeywords: {
-          naver: "로지텍 MX Master 3S",
-          coupang: "로지텍 MX 마스터 3S",
-          google: "Logitech MX Master 3S",
-        },
-      },
     ],
   };
 }
 
-// 6. POST 요청 처리
+// 7. POST 요청 처리
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -203,14 +258,32 @@ export async function POST(request: Request) {
     }
 
     // ========================================================================
-    // ★ 최신 Gemini 2.5 / 2.0 / 1.5 비전 멀티모달 분석 실행
+    // ★ 1단계: 구글 ListModels를 통해 남건의 계정에서 실제 사용 가능한 최신 모델 동적 해결
     // ========================================================================
+    const resolved = await resolveOptimalModel(effectiveApiKey);
+    if (resolved.error || !resolved.modelPath) {
+      return NextResponse.json(
+        {
+          error: `Google API 오류: ${resolved.error || "사용 가능한 모델이 없습니다."} (API 키를 다시 확인해 주세요)`,
+        },
+        { status: 400 }
+      );
+    }
 
-    // 1) 고화질 썸네일(영상 프레임) 이미지 다운로드 및 base64 인코딩
+    // modelPath는 "models/gemini-1.5-flash" 등의 형태
+    const targetModelPath = resolved.modelPath.startsWith("models/")
+      ? resolved.modelPath
+      : `models/${resolved.modelPath}`;
+
+    // ========================================================================
+    // ★ 2단계: 실제 영상 프레임 썸네일 이미지 다운로드 (Vision 멀티모달)
+    // ========================================================================
     const primaryImgUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
     const imageBase64 = await fetchImageAsBase64(primaryImgUrl);
 
-    // 2) 시스템 프롬프트 구성 (순수 JSON 강제)
+    // ========================================================================
+    // ★ 3단계: 프롬프트 구성 및 실시간 생성 요청
+    // ========================================================================
     const systemPrompt = `
 당신은 영상 속에 등장하는 제품(패션 의류, 전자기기, 인테리어 소품, 뷰티/화장품 등)을 정밀하게 식별하는 제니트리 AI 비전 분석가입니다.
 주어진 영상 프레임 이미지와 메타데이터(제목, 채널)를 면밀히 관찰하여, 화면 속에서 실제로 포착되는 제품들을 찾아내어 아래 JSON 규격으로 응답하세요.
@@ -244,7 +317,6 @@ export async function POST(request: Request) {
 첨부된 영상 프레임 이미지와 맥락을 종합 분석하여, 실제 등장하는 매력적인 제품들을 3~6개 식별해 주세요.
 `;
 
-    // 3) 멀티모달 요청 parts 구성 (이미지가 있을 경우 inlineData 포함)
     const parts: any[] = [{ text: systemPrompt }];
     if (imageBase64) {
       parts.push({
@@ -256,73 +328,33 @@ export async function POST(request: Request) {
     }
     parts.push({ text: userMessage });
 
-    // 4) 최신 모델 우선순위 라인업 (Gemini 2.5 ➔ 2.0 ➔ 1.5)
-    const candidateModels = [
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-2.0-flash-lite",
-      "gemini-1.5-flash",
-      "gemini-1.5-flash-latest",
-      "gemini-2.5-pro",
-      "gemini-1.5-pro",
-    ];
+    const generateUrl = `https://generativelanguage.googleapis.com/v1beta/${targetModelPath}:generateContent?key=${effectiveApiKey}`;
 
-    let lastErrorText = "";
-    let geminiSuccessData: any = null;
-    let usedModel = "";
-
-    for (const modelName of candidateModels) {
-      try {
-        const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${effectiveApiKey}`;
-
-        const apiRes = await fetch(targetUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts }],
-            generationConfig: {
-              temperature: 0.2,
-              responseMimeType: "application/json",
-            },
-          }),
-        });
-
-        if (apiRes.ok) {
-          geminiSuccessData = await apiRes.json();
-          usedModel = modelName;
-          break; // 성공 시 루프 탈출
-        } else {
-          lastErrorText = await apiRes.text();
-          console.warn(`[Gemini API] 모델 ${modelName} 호출 실패:`, lastErrorText);
-        }
-      } catch (callErr: any) {
-        lastErrorText = callErr.message || String(callErr);
-      }
-    }
-
-    // 모든 모델에서 실패한 경우: 사용자가 API 키를 넣었으므로 절대 조용히 숨기지 않고 명확한 에러를 반환
-    if (!geminiSuccessData) {
-      let friendlyMessage = "Google Gemini AI 서버와 통신 중 오류가 발생했습니다.";
-      try {
-        const parsedErr = JSON.parse(lastErrorText);
-        if (parsedErr?.error?.message) {
-          friendlyMessage = `Google API 오류: ${parsedErr.error.message}`;
-        }
-      } catch {
-        if (lastErrorText) friendlyMessage += ` (${lastErrorText.slice(0, 150)})`;
-      }
-
-      return NextResponse.json(
-        {
-          error: `${friendlyMessage} (입력하신 API 키가 올바른지 확인해 주세요)`,
+    const generateRes = await fetch(generateUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: "application/json",
         },
-        { status: 400 }
-      );
+      }),
+    });
+
+    if (!generateRes.ok) {
+      const errText = await generateRes.text();
+      let errorMsg = `Google API 오류 (${generateRes.status})`;
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed?.error?.message) errorMsg = `Google API 오류: ${parsed.error.message}`;
+      } catch {}
+      return NextResponse.json({ error: errorMsg }, { status: 400 });
     }
 
-    // 5) AI 응답 파싱
+    const geminiData = (await generateRes.json()) as any;
     const rawContent =
-      geminiSuccessData?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 
     let parsedResult: any;
     try {
@@ -333,13 +365,13 @@ export async function POST(request: Request) {
         parsedResult = JSON.parse(jsonMatch[0]);
       } else {
         return NextResponse.json(
-          { error: "AI 분석 결과 형식을 해석하지 못했습니다. 다시 시도해 주세요." },
+          { error: "AI 응답 형식을 해석하지 못했습니다. 다시 시도해 주세요." },
           { status: 500 }
         );
       }
     }
 
-    // 6) 규격화된 제품 데이터 완성
+    // 규격화된 제품 데이터 완성
     const refinedProducts = (parsedResult.products || []).map(
       (prod: any, idx: number) => ({
         id: prod.id || `prod-${idx + 1}`,
@@ -360,7 +392,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       isDemoMode: false,
-      aiModel: usedModel,
+      aiModel: resolved.displayName || targetModelPath.replace("models/", ""),
       video: {
         id: videoId,
         title: metadata.title,

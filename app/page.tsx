@@ -36,7 +36,7 @@ interface AnalysisResponse {
 }
 
 // ============================================================================
-// [메인 컴포넌트] 영상 속 제품 분석 앱
+// [메인 컴포넌트] 제니트리 JT_ProductLens 영상 제품 분석 시스템
 // ============================================================================
 export default function VideoProductAnalyzer() {
   // 사용자가 입력한 영상 링크 상태값
@@ -55,19 +55,14 @@ export default function VideoProductAnalyzer() {
   // 클립보드 복사 성공 알림
   const [copySuccess, setCopySuccess] = useState(false);
 
-  // ── API 키 설정 관련 상태 ──
-  // API 설정 모달 열림/닫힘
+  // ── API 키 설정 관련 상태 (브라우저 localStorage 보관) ──
   const [isSettingOpen, setIsSettingOpen] = useState(false);
-  // 현재 저장된 API 키 (브라우저 로컬스토리지에서 불러옴)
   const [apiKey, setApiKey] = useState("");
-  // 모달 안의 API 키 입력창 임시 값
   const [apiKeyInput, setApiKeyInput] = useState("");
-  // API 키 저장 완료 메시지 표시 여부
   const [apiKeySaved, setApiKeySaved] = useState(false);
-  // API 키 입력창 비밀번호 표시/숨김
   const [showApiKey, setShowApiKey] = useState(false);
 
-  // 페이지 처음 로드 시 로컬스토리지에서 API 키 불러오기
+  // 페이지 마운트 시 localStorage에서 저장된 API 키 로드
   useEffect(() => {
     const savedKey = localStorage.getItem("gemini_api_key") || "";
     setApiKey(savedKey);
@@ -83,7 +78,7 @@ export default function VideoProductAnalyzer() {
     setTimeout(() => {
       setApiKeySaved(false);
       setIsSettingOpen(false);
-    }, 1500);
+    }, 1200);
   };
 
   // API 키 삭제 핸들러
@@ -97,21 +92,19 @@ export default function VideoProductAnalyzer() {
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!videoUrl.trim()) {
-      setErrorMessage("영상 링크를 입력해 주세요!");
+      setErrorMessage("분석할 유튜브 영상 링크를 입력해 주세요.");
       return;
     }
 
     setErrorMessage(null);
     setIsLoading(true);
-    setLoadingStep("영상 정보를 확인하고 있습니다...");
+    setLoadingStep("영상 메타데이터를 정밀 조회하고 있습니다...");
 
     try {
-      // 1초 뒤 단계 메시지 변경 (사용자 시각적 피드백)
       const timer = setTimeout(() => {
-        setLoadingStep("AI가 영상 속 제품과 타임스탬프를 스캔 중입니다...");
+        setLoadingStep("AI 멀티모달 엔진이 영상 속 제품과 시점을 분석하고 있습니다...");
       }, 1200);
 
-      // API 키를 함께 전송 (서버에서 이 키를 이용해 Gemini API 호출)
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -123,7 +116,7 @@ export default function VideoProductAnalyzer() {
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        setErrorMessage(data.error || "영상 분석에 실패했습니다.");
+        setErrorMessage(data.error || "영상 분석 처리에 실패했습니다.");
         setIsLoading(false);
         return;
       }
@@ -139,13 +132,13 @@ export default function VideoProductAnalyzer() {
     }
   };
 
-  // 2. 예시 링크 자동 채우기 함수
+  // 2. 테스트용 샘플 링크 자동 채우기
   const handleSampleFill = (sampleUrl: string) => {
     setVideoUrl(sampleUrl);
     setErrorMessage(null);
   };
 
-  // 3. 타임스탬프 클릭 시 영상 해당 시간대로 이동
+  // 3. 타임스탬프 클릭 시 영상 해당 구간으로 점프
   const handleJumpToTime = (seconds: number) => {
     setActiveSeconds(seconds);
     const playerEl = document.getElementById("video-player-section");
@@ -158,14 +151,15 @@ export default function VideoProductAnalyzer() {
   const handleCopyResults = () => {
     if (!analysisData) return;
     const textLines = [
-      `[영상] ${analysisData.video.title}`,
-      `[링크] ${analysisData.video.url}`,
-      `[AI 요약] ${analysisData.summary}`,
+      `[JT_ProductLens 분석 보고서]`,
+      `영상명: ${analysisData.video.title}`,
+      `URL: ${analysisData.video.url}`,
+      `요약: ${analysisData.summary}`,
       "",
-      "--- 감지된 제품 목록 ---",
+      "--- 검출 제품 목록 ---",
       ...analysisData.products.map(
         (p, idx) =>
-          `${idx + 1}. [${p.timestamp}] ${p.name} (${p.brand}) - ${p.description}`
+          `${idx + 1}. [${p.timestamp}] ${p.name} (${p.brand}) / ${p.category} - ${p.description}`
       ),
     ];
     navigator.clipboard.writeText(textLines.join("\n"));
@@ -173,7 +167,7 @@ export default function VideoProductAnalyzer() {
     setTimeout(() => setCopySuccess(false), 2500);
   };
 
-  // 5. 카테고리 목록 추출
+  // 5. 카테고리 필터 목록 추출
   const categories = [
     "전체",
     ...Array.from(
@@ -181,7 +175,7 @@ export default function VideoProductAnalyzer() {
     ),
   ];
 
-  // 6. 현재 선택된 카테고리에 맞는 제품들만 필터링
+  // 6. 카테고리 필터링된 제품 리스트
   const filteredProducts =
     selectedCategory === "전체"
       ? analysisData?.products || []
@@ -191,42 +185,37 @@ export default function VideoProductAnalyzer() {
 
   return (
     <div className="app-container">
-      {/* ======================= 상단 네비게이션 헤더 ======================= */}
+      {/* ======================= 제니트리 표준 헤더 ======================= */}
       <header className="header">
         <div className="header-inner">
           <div className="logo-group">
-            <span className="logo-icon">🔍</span>
-            <div>
-              <h1 className="logo-title">ProductLens AI</h1>
-              <p className="logo-sub">영상 속 제품 AI 자동 감지 & 쇼핑 스캐너</p>
+            {/* 제니트리 브랜드 심볼 */}
+            <div className="jt-brand-badge">JT</div>
+            <div className="logo-title-group">
+              <div className="logo-title-row">
+                <span className="logo-title">JT_ProductLens</span>
+                <span className="domain-tag">AI · R&D</span>
+              </div>
+              <p className="logo-sub">제니트리 영상 제품 분석 & 메타데이터 추출 솔루션</p>
             </div>
           </div>
+
           <div className="header-right">
-            {/* API 키 상태 표시 및 설정 버튼 */}
+            {/* 제니트리 API 키 상태 버튼 */}
             <button
               onClick={() => {
                 setApiKeyInput(apiKey);
                 setIsSettingOpen(true);
               }}
               className={`api-setting-btn ${apiKey ? "has-key" : "no-key"}`}
-              title="Gemini API 키 설정"
+              title="Gemini API 키 환경 설정"
             >
-              {apiKey ? (
-                <>
-                  <span className="dot-green"></span>
-                  API 키 설정됨 ⚙️
-                </>
-              ) : (
-                <>
-                  <span className="dot-red"></span>
-                  API 키 없음 ⚙️
-                </>
-              )}
+              <span
+                className={`dot-indicator ${apiKey ? "green" : "yellow"}`}
+              ></span>
+              {apiKey ? "Gemini API 연동됨" : "API 키 미설정 (데모)"}
             </button>
-            <div className="badge-cloudflare">
-              <span className="dot-green"></span>
-              Cloudflare 배포 지원
-            </div>
+            <div className="badge-cloudflare">Cloudflare Pages</div>
           </div>
         </div>
       </header>
@@ -236,63 +225,71 @@ export default function VideoProductAnalyzer() {
         <div className="modal-overlay" onClick={() => setIsSettingOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">🔑 Gemini API 키 설정</h2>
-              <button className="modal-close" onClick={() => setIsSettingOpen(false)}>✕</button>
+              <h2 className="modal-title">Gemini API 키 설정</h2>
+              <button
+                className="modal-close"
+                onClick={() => setIsSettingOpen(false)}
+                title="닫기"
+              >
+                ✕
+              </button>
             </div>
 
             <div className="modal-body">
               <p className="modal-desc">
-                Google Gemini API 키를 입력하시면 영상 속 제품을 실제 AI로 정밀 분석합니다.
-                <br />
-                API 키는 이 기기의 브라우저에만 안전하게 저장되며, 외부로 절대 전송되지 않습니다.
+                Google Gemini API 키를 등록하면 실제 영상 속 제품을 실시간 AI 모델로
+                정밀 식별합니다. API 키는 사용자 로컬 브라우저에만 안전하게 저장됩니다.
               </p>
 
-              {/* API 키 발급 안내 링크 */}
               <a
                 href="https://aistudio.google.com/apikey"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="api-guide-link"
               >
-                🌐 Google AI Studio에서 무료 API 키 발급받기 →
+                Google AI Studio에서 무료 API 키 발급받기 →
               </a>
 
-              {/* API 키 입력창 */}
               <div className="api-input-wrapper">
                 <input
                   type={showApiKey ? "text" : "password"}
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
-                  placeholder="AIzaSy... 형태의 API 키를 붙여넣으세요"
+                  placeholder="AIzaSy... 형태의 API 키를 입력하세요"
                   className="api-key-input"
                 />
                 <button
                   type="button"
                   onClick={() => setShowApiKey(!showApiKey)}
                   className="show-key-btn"
-                  title={showApiKey ? "숨기기" : "보이기"}
+                  title={showApiKey ? "키 숨기기" : "키 보기"}
                 >
-                  {showApiKey ? "🙈" : "👁️"}
+                  {showApiKey ? "숨김" : "표시"}
                 </button>
               </div>
 
-              {/* 현재 저장된 키 상태 표시 */}
               {apiKey && (
                 <div className="saved-key-status">
-                  <span>✅ 저장된 키: {apiKey.slice(0, 8)}•••{apiKey.slice(-4)}</span>
-                  <button onClick={handleDeleteApiKey} className="delete-key-btn">
-                    🗑️ 삭제
+                  <span>등록 키: {apiKey.slice(0, 8)}•••{apiKey.slice(-4)}</span>
+                  <button
+                    onClick={handleDeleteApiKey}
+                    className="delete-key-btn"
+                  >
+                    삭제
                   </button>
                 </div>
               )}
             </div>
 
             <div className="modal-footer">
-              <button onClick={() => setIsSettingOpen(false)} className="modal-cancel-btn">
+              <button
+                onClick={() => setIsSettingOpen(false)}
+                className="modal-cancel-btn"
+              >
                 취소
               </button>
               <button onClick={handleSaveApiKey} className="modal-save-btn">
-                {apiKeySaved ? "✅ 저장 완료!" : "💾 저장하기"}
+                {apiKeySaved ? "저장 완료" : "설정 저장"}
               </button>
             </div>
           </div>
@@ -301,43 +298,41 @@ export default function VideoProductAnalyzer() {
 
       {/* ======================= 메인 콘텐츠 본문 ======================= */}
       <main className="main-content">
-        {/* 히어로 & 입력 폼 영역 */}
+        {/* 히어로 영역 */}
         <section className="hero-section">
-          {/* API 키 미설정 안내 배너 */}
           {!apiKey && (
             <div className="api-warn-banner">
-              <span>⚠️</span>
               <span>
-                Gemini API 키가 없습니다. 지금은 <strong>데모 모드</strong>로 작동합니다.{" "}
+                현재 데모 모드로 작동 중입니다. 정밀 분석을 위해{" "}
                 <button
                   onClick={() => setIsSettingOpen(true)}
                   className="inline-setting-link"
                 >
-                  API 키 설정하기 →
+                  Gemini API 키를 등록
                 </button>
+                해 주세요.
               </span>
             </div>
           )}
 
-          <h2 className="hero-heading">
-            영상 링크만 넣으면, <br />
-            <span className="gradient-text">AI가 영상 속 모든 제품</span>을 찾아드립니다
-          </h2>
+          <h1 className="hero-heading">
+            영상 속 제품을 정밀하게 감지하는 <br />
+            <span className="hero-heading-highlight">AI 멀티모달 비전 분석 솔루션</span>
+          </h1>
           <p className="hero-desc">
-            유튜브 영상이나 쇼츠 링크를 입력해 보세요. 영상에 등장하는 의류,
-            전자기기, 인테리어 소품을 식별하고 타임스탬프와 쇼핑 검색을 한눈에
-            보여줍니다.
+            분석할 영상 링크를 입력하면 프레임별 제품 정보(브랜드, 카테고리, 제품 설명)와
+            등장 시점(타임스탬프), 최저가 쇼핑 연동 데이터를 한 화면에서 정밀하게 파악합니다.
           </p>
 
-          {/* 링크 입력 폼 */}
+          {/* 링크 입력창 */}
           <form onSubmit={handleAnalyze} className="input-form">
             <div className="input-wrapper">
-              <span className="input-icon">🔗</span>
+              <span className="input-icon">⌕</span>
               <input
                 type="text"
                 value={videoUrl}
                 onChange={(e) => setVideoUrl(e.target.value)}
-                placeholder="예: https://www.youtube.com/watch?v=... 또는 쇼츠 링크"
+                placeholder="유튜브 일반 영상 또는 쇼츠 URL을 입력하세요 (예: https://www.youtube.com/watch?v=...)"
                 className="url-input"
                 disabled={isLoading}
               />
@@ -351,15 +346,15 @@ export default function VideoProductAnalyzer() {
                     <span className="spinner"></span> 분석 중...
                   </span>
                 ) : (
-                  <span>분석 시작 ✨</span>
+                  <span>분석 실행</span>
                 )}
               </button>
             </div>
           </form>
 
-          {/* 빠른 테스트용 샘플 버튼들 */}
+          {/* 샘플 영상 빠른 버튼 */}
           <div className="sample-buttons">
-            <span className="sample-label">빠른 체험:</span>
+            <span className="sample-label">테스트 샘플:</span>
             <button
               type="button"
               onClick={() =>
@@ -367,7 +362,7 @@ export default function VideoProductAnalyzer() {
               }
               className="sample-pill"
             >
-              🎬 샘플 영상 1
+              샘플 영상 01
             </button>
             <button
               type="button"
@@ -376,63 +371,63 @@ export default function VideoProductAnalyzer() {
               }
               className="sample-pill"
             >
-              📱 샘플 영상 2
+              샘플 영상 02
             </button>
           </div>
 
-          {/* 에러 메시지 표시 */}
+          {/* 에러 발생 시 안내 박스 */}
           {errorMessage && (
             <div className="error-box">
-              <span>⚠️ {errorMessage}</span>
+              <span>{errorMessage}</span>
             </div>
           )}
 
-          {/* 분석 진행 중 단계 안내 */}
+          {/* 로딩 인디케이터 */}
           {isLoading && (
             <div className="loading-card">
-              <div className="pulse-loader"></div>
+              <div className="jt-progress-bar-wrap">
+                <div className="jt-progress-bar-inner"></div>
+              </div>
               <p className="loading-text">{loadingStep}</p>
-              <p className="loading-subtext">잠시만 기다려 주세요 (약 2~4초 소요)</p>
+              <p className="loading-subtext">데이터 규격에 맞추어 제품 목록을 추출하고 있습니다.</p>
             </div>
           )}
         </section>
 
-        {/* ======================= 분석 결과 대시보드 ======================= */}
+        {/* ======================= 분석 결과 영역 ======================= */}
         {analysisData && (
           <section className="results-section">
-            {/* 데모 모드 안내 배너 */}
             {analysisData.isDemoMode && (
               <div className="notice-banner">
-                <span className="notice-icon">💡</span>
-                <div className="notice-text">
-                  <strong>체험 데모 모드 작동 중:</strong>{" "}
+                <span>
+                  <strong>데모 시뮬레이션 결과:</strong> 실제 AI 분석 결과를 원하시면{" "}
                   <button
                     onClick={() => setIsSettingOpen(true)}
                     className="inline-setting-link"
                   >
-                    API 키를 설정
+                    API 키를 등록
                   </button>
-                  하시면 실제 실시간 AI 분석으로 즉시 전환됩니다.
-                </div>
+                  해 주세요.
+                </span>
               </div>
             )}
 
-            {/* 결과 상단 정보 바 */}
+            {/* 결과 상단 바 */}
             <div className="results-header-bar">
               <div>
-                <h3 className="results-title">
-                  🎉 제품 {analysisData.products.length}개가 감지되었습니다
-                </h3>
-                <p className="results-summary">"{analysisData.summary}"</p>
+                <h2 className="results-title">
+                  총 {analysisData.products.length}개의 제품이 검출되었습니다
+                </h2>
+                <p className="results-summary">{analysisData.summary}</p>
               </div>
               <button onClick={handleCopyResults} className="copy-btn">
-                {copySuccess ? "✅ 복사 완료!" : "📋 결과 전체 복사"}
+                {copySuccess ? "복사 완료 ✓" : "분석 리포트 복사"}
               </button>
             </div>
 
-            {/* 메인 2열 그리드: 왼쪽(영상 플레이어) / 오른쪽(제품 카드 리스트) */}
+            {/* 메인 2열 그리드 */}
             <div className="grid-layout">
-              {/* 왼쪽: 영상 플레이어 영역 */}
+              {/* 좌측: 영상 뷰어 */}
               <div id="video-player-section" className="player-column">
                 <div className="player-card">
                   <div className="video-responsive">
@@ -450,22 +445,21 @@ export default function VideoProductAnalyzer() {
                     ></iframe>
                   </div>
                   <div className="video-meta">
-                    <h4 className="video-title">{analysisData.video.title}</h4>
-                    <p className="video-author">
-                      채널: <strong>{analysisData.video.author}</strong>
+                    <h3 className="video-title">{analysisData.video.title}</h3>
+                    <div className="video-author">
+                      <span>채널: {analysisData.video.author}</span>
                       {activeSeconds !== null && (
                         <span className="time-indicator">
-                          ▶ {Math.floor(activeSeconds / 60)}분 {activeSeconds % 60}초로 이동됨
+                          {Math.floor(activeSeconds / 60)}분 {activeSeconds % 60}초 재생 중
                         </span>
                       )}
-                    </p>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* 오른쪽: 카테고리 필터 및 감지된 제품 목록 */}
+              {/* 우측: 카테고리 필터 & 제품 리스트 */}
               <div className="products-column">
-                {/* 카테고리 필터 탭 */}
                 <div className="category-filter">
                   {categories.map((cat) => (
                     <button
@@ -480,31 +474,25 @@ export default function VideoProductAnalyzer() {
                   ))}
                 </div>
 
-                {/* 제품 카드 목록 */}
                 <div className="product-list">
                   {filteredProducts.map((prod) => (
                     <div key={prod.id} className="product-card">
-                      {/* 상단 뱃지 & 타임스탬프 */}
                       <div className="card-top">
                         <span className="category-tag">{prod.category}</span>
                         <button
                           type="button"
                           onClick={() => handleJumpToTime(prod.timestampSeconds)}
                           className="timestamp-btn"
-                          title="클릭 시 이 시간으로 영상 이동"
+                          title="클릭 시 영상 해당 시점으로 이동"
                         >
-                          ⏱️ {prod.timestamp}
+                          {prod.timestamp}
                         </button>
                       </div>
 
-                      {/* 제품명 & 브랜드 */}
                       <h4 className="product-name">{prod.name}</h4>
-                      <p className="product-brand">브랜드: {prod.brand}</p>
-
-                      {/* 제품 외형 및 특징 설명 */}
+                      <p className="product-brand">{prod.brand}</p>
                       <p className="product-desc">{prod.description}</p>
 
-                      {/* 쇼핑 검색 바로가기 버튼 그룹 */}
                       <div className="shopping-links">
                         <a
                           href={`https://search.shopping.naver.com/search/all?query=${encodeURIComponent(
@@ -514,7 +502,7 @@ export default function VideoProductAnalyzer() {
                           rel="noopener noreferrer"
                           className="shop-btn naver"
                         >
-                          🟢 네이버 쇼핑
+                          네이버 쇼핑
                         </a>
                         <a
                           href={`https://www.coupang.com/np/search?component=&q=${encodeURIComponent(
@@ -524,7 +512,7 @@ export default function VideoProductAnalyzer() {
                           rel="noopener noreferrer"
                           className="shop-btn coupang"
                         >
-                          🔴 쿠팡 검색
+                          쿠팡 검색
                         </a>
                         <a
                           href={`https://www.google.com/search?tbm=shop&q=${encodeURIComponent(
@@ -534,7 +522,7 @@ export default function VideoProductAnalyzer() {
                           rel="noopener noreferrer"
                           className="shop-btn google"
                         >
-                          🔵 구글 쇼핑
+                          구글 쇼핑
                         </a>
                       </div>
                     </div>
@@ -546,9 +534,9 @@ export default function VideoProductAnalyzer() {
         )}
       </main>
 
-      {/* ======================= 푸터 ======================= */}
+      {/* ======================= 제니트리 표준 푸터 ======================= */}
       <footer className="footer">
-        <p>© 2026 ProductLens AI · Cloudflare Pages 자동 배포 준비 완료</p>
+        <p>© 2026 JANYTREE Co., Ltd. All rights reserved. · JT_ProductLens v3.0</p>
       </footer>
     </div>
   );

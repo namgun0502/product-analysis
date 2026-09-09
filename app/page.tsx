@@ -151,7 +151,7 @@ export default function VideoProductAnalyzer() {
   const handleCopyResults = () => {
     if (!analysisData) return;
     const textLines = [
-      `[JT_ProductLens 분석 보고서]`,
+      `[JANYTREE ProductLens 분석 리포트]`,
       `영상명: ${analysisData.video.title}`,
       `URL: ${analysisData.video.url}`,
       `요약: ${analysisData.summary}`,
@@ -185,23 +185,32 @@ export default function VideoProductAnalyzer() {
 
   return (
     <div className="app-container">
-      {/* ======================= 제니트리 표준 헤더 ======================= */}
+      {/* ======================= 제니트리 공식 헤더 ======================= */}
       <header className="header">
         <div className="header-inner">
           <div className="logo-group">
-            {/* 제니트리 브랜드 심볼 */}
-            <div className="jt-brand-badge">JT</div>
+            {/* 제니트리 공식 가로형 벡터 로고 (J⁺ + janytree) */}
+            <div className="jt-official-logo">
+              <img
+                src="/brand/logo/logo-h.svg"
+                alt="JANYTREE"
+                height={28}
+                style={{ width: "auto", display: "block" }}
+              />
+            </div>
+
+            {/* 브랜드 디바이더 */}
+            <div className="header-brand-divider"></div>
+
+            {/* 앱 명칭 및 도메인 뱃지 */}
             <div className="logo-title-group">
-              <div className="logo-title-row">
-                <span className="logo-title">JT_ProductLens</span>
-                <span className="domain-tag">AI · R&D</span>
-              </div>
-              <p className="logo-sub">제니트리 영상 제품 분석 & 메타데이터 추출 솔루션</p>
+              <span className="header-app-name">ProductLens</span>
+              <span className="domain-tag">AI · R&D</span>
             </div>
           </div>
 
           <div className="header-right">
-            {/* 제니트리 API 키 상태 버튼 */}
+            {/* API 키 상태 버튼 */}
             <button
               onClick={() => {
                 setApiKeyInput(apiKey);

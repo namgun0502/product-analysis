@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 
 // ============================================================================
 // [API 설명] 제니트리 JT_ProductLens 영상 제품 분석 백엔드 엔드포인트
-// - 클라우드플레어(Cloudflare) 엣지 환경과 100% 호환되는 표준 fetch 사용
-// - 유튜브 영상 프레임(고화질 썸네일)을 실시간으로 가져와 Gemini 멀티모달(Vision)로 분석
-// - Silent Fallback 버그를 완전히 제거하여, 사용자가 입력한 API 키의 상태를 정직하게 반영
+// - 최신 Gemini 2.5 Flash / 2.0 Flash / 1.5 Flash 전 세대 모델 지능형 자동 감지
+// - 유튜브 영상 프레임(고화질 썸네일)을 실시간으로 가져와 멀티모달 비전 AI로 분석
+// - 클라우드플레어(Cloudflare) 엣지 환경과 100% 호환
 // ============================================================================
 
 // 1. 유튜브 URL에서 비디오 ID 추출 함수
@@ -203,7 +203,7 @@ export async function POST(request: Request) {
     }
 
     // ========================================================================
-    // ★ 사용자가 API 키를 등록한 경우: 실제 Gemini AI 멀티모달 비전 분석 실행
+    // ★ 최신 Gemini 2.5 / 2.0 / 1.5 비전 멀티모달 분석 실행
     // ========================================================================
 
     // 1) 고화질 썸네일(영상 프레임) 이미지 다운로드 및 base64 인코딩
@@ -256,16 +256,20 @@ export async function POST(request: Request) {
     }
     parts.push({ text: userMessage });
 
-    // 4) Gemini 모델 스마트 폴백 (1.5-flash ➔ 2.0-flash ➔ 1.5-pro)
+    // 4) 최신 모델 우선순위 라인업 (Gemini 2.5 ➔ 2.0 ➔ 1.5)
     const candidateModels = [
-      "gemini-1.5-flash",
+      "gemini-2.5-flash",
       "gemini-2.0-flash",
+      "gemini-2.0-flash-lite",
+      "gemini-1.5-flash",
       "gemini-1.5-flash-latest",
+      "gemini-2.5-pro",
       "gemini-1.5-pro",
     ];
 
     let lastErrorText = "";
     let geminiSuccessData: any = null;
+    let usedModel = "";
 
     for (const modelName of candidateModels) {
       try {
@@ -285,6 +289,7 @@ export async function POST(request: Request) {
 
         if (apiRes.ok) {
           geminiSuccessData = await apiRes.json();
+          usedModel = modelName;
           break; // 성공 시 루프 탈출
         } else {
           lastErrorText = await apiRes.text();
@@ -323,7 +328,6 @@ export async function POST(request: Request) {
     try {
       parsedResult = JSON.parse(rawContent);
     } catch {
-      // JSON 파싱 실패 시 정규식 등으로 백업 시도
       const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         parsedResult = JSON.parse(jsonMatch[0]);
@@ -356,6 +360,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       isDemoMode: false,
+      aiModel: usedModel,
       video: {
         id: videoId,
         title: metadata.title,

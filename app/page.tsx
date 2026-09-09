@@ -23,6 +23,7 @@ interface ProductItem {
 interface AnalysisResponse {
   success: boolean;
   isDemoMode?: boolean;
+  aiModel?: string;
   notice?: string;
   video: {
     id: string;
@@ -62,10 +63,11 @@ export default function VideoProductAnalyzer() {
   const [apiKeySaved, setApiKeySaved] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
 
-  // API 키 즉시 검증 상태
+  // API 키 최신 모델 검증 상태
   const [isValidating, setIsValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<{
     valid: boolean;
+    model?: string;
     message: string;
   } | null>(null);
 
@@ -76,7 +78,7 @@ export default function VideoProductAnalyzer() {
     setApiKeyInput(savedKey);
   }, []);
 
-  // API 키 유효성 실시간 사전 테스트
+  // 최신 모델 인식 실시간 사전 테스트
   const handleValidateApiKey = async () => {
     const trimmed = apiKeyInput.trim();
     if (!trimmed) {
@@ -96,7 +98,8 @@ export default function VideoProductAnalyzer() {
       const data = await res.json();
       setValidationResult({
         valid: res.ok && data.valid,
-        message: data.message || (res.ok ? "정상 작동하는 키입니다!" : "인증 실패"),
+        model: data.model,
+        message: data.message || (res.ok ? "최신 모델 연동 성공!" : "인증 실패"),
       });
     } catch (err: any) {
       setValidationResult({
@@ -142,7 +145,7 @@ export default function VideoProductAnalyzer() {
 
     try {
       const timer = setTimeout(() => {
-        setLoadingStep("AI 멀티모달 비전 엔진이 화면 속 제품을 시각적으로 식별 중입니다...");
+        setLoadingStep("최신 Gemini 비전 엔진이 화면 속 제품을 시각적으로 정밀 식별 중입니다...");
       }, 1400);
 
       const res = await fetch("/api/analyze", {
@@ -191,7 +194,7 @@ export default function VideoProductAnalyzer() {
   const handleCopyResults = () => {
     if (!analysisData) return;
     const textLines = [
-      `[JANYTREE ProductLens 분석 리포트]`,
+      `[JANYTREE ProductLens 분석 리포트 - ${analysisData.aiModel || "Gemini AI"}]`,
       `영상명: ${analysisData.video.title}`,
       `URL: ${analysisData.video.url}`,
       `요약: ${analysisData.summary}`,
@@ -263,7 +266,7 @@ export default function VideoProductAnalyzer() {
               <span
                 className={`dot-indicator ${apiKey ? "green" : "yellow"}`}
               ></span>
-              {apiKey ? "Gemini API 키 등록됨" : "API 키 미설정 (데모)"}
+              {apiKey ? "Gemini 최신 API 연동됨" : "API 키 미설정 (데모)"}
             </button>
             <div className="badge-cloudflare">Cloudflare Pages</div>
           </div>
@@ -275,7 +278,7 @@ export default function VideoProductAnalyzer() {
         <div className="modal-overlay" onClick={() => setIsSettingOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">Gemini API 키 설정</h2>
+              <h2 className="modal-title">Gemini API 키 설정 (최신 버전 지원)</h2>
               <button
                 className="modal-close"
                 onClick={() => setIsSettingOpen(false)}
@@ -287,8 +290,8 @@ export default function VideoProductAnalyzer() {
 
             <div className="modal-body">
               <p className="modal-desc">
-                Google Gemini API 키를 등록하시면 실제 영상 속 제품을 실시간 비전 AI 모델로
-                정밀 분석합니다. 키는 본인 브라우저에만 안전하게 보관됩니다.
+                최신 <strong>Gemini 2.5 Flash / 2.0 Flash / 1.5 Pro</strong> 등 모든 버전의
+                API 키를 지원합니다. 등록 시 가장 최신 비전 엔진이 자동 감지됩니다.
               </p>
 
               <a
@@ -297,7 +300,7 @@ export default function VideoProductAnalyzer() {
                 rel="noopener noreferrer"
                 className="api-guide-link"
               >
-                Google AI Studio에서 무료 API 키 발급받기 →
+                Google AI Studio에서 최신 무료 API 키 발급받기 →
               </a>
 
               {/* API 키 입력창 및 검증 버튼 */}
@@ -322,7 +325,7 @@ export default function VideoProductAnalyzer() {
                 </button>
               </div>
 
-              {/* API 키 즉시 테스트 버튼 */}
+              {/* 최신 모델 인식 테스트 버튼 */}
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 <button
                   type="button"
@@ -331,7 +334,7 @@ export default function VideoProductAnalyzer() {
                   className="sample-pill"
                   style={{ padding: "0.45rem 1rem", fontSize: "0.85rem" }}
                 >
-                  {isValidating ? "키 연결 확인 중..." : "⚡ 키 정상 작동 테스트"}
+                  {isValidating ? "최신 모델 탐색 및 검증 중..." : "⚡ 최신 모델 인식 테스트"}
                 </button>
               </div>
 
@@ -383,12 +386,12 @@ export default function VideoProductAnalyzer() {
           {!apiKey && (
             <div className="api-warn-banner">
               <span>
-                현재 데모 모드로 작동 중입니다. 실시간 비전 AI 분석을 위해{" "}
+                현재 데모 모드로 작동 중입니다. 최신 Gemini 비전 AI 분석을 위해{" "}
                 <button
                   onClick={() => setIsSettingOpen(true)}
                   className="inline-setting-link"
                 >
-                  Gemini API 키를 등록
+                  API 키를 등록
                 </button>
                 해 주세요.
               </span>
@@ -495,9 +498,16 @@ export default function VideoProductAnalyzer() {
             {/* 결과 상단 바 */}
             <div className="results-header-bar">
               <div>
-                <h2 className="results-title">
-                  총 {analysisData.products.length}개의 제품이 검출되었습니다
-                </h2>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                  <h2 className="results-title">
+                    총 {analysisData.products.length}개의 제품이 검출되었습니다
+                  </h2>
+                  {analysisData.aiModel && (
+                    <span className="domain-tag" style={{ background: "#EEF3FE", color: "#24419E", borderColor: "#D6E1FC" }}>
+                      ⚡ {analysisData.aiModel}
+                    </span>
+                  )}
+                </div>
                 <p className="results-summary">{analysisData.summary}</p>
               </div>
               <button onClick={handleCopyResults} className="copy-btn">

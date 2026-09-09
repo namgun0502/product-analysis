@@ -1,30 +1,26 @@
 import { NextResponse } from "next/server";
 
 // ============================================================================
-// [API 설명] 영상 속 제품 분석 서버 엔드포인트
-// - 클라우드플레어(Cloudflare) 엣지 환경과 100% 호환되도록 표준 fetch를 사용합니다.
-// - 사용자가 보낸 유튜브 영상 링크의 메타데이터(제목, 썸네일 등)를 추출하고,
-//   Google Gemini AI를 호출하여 영상 속 제품 목록(시간대, 제품명, 특징 등)을 분석합니다.
+// [API 설명] 제니트리 JT_ProductLens 영상 제품 분석 백엔드 엔드포인트
+// - 클라우드플레어(Cloudflare) 엣지 환경과 100% 호환되는 표준 fetch 사용
+// - 유튜브 영상 프레임(고화질 썸네일)을 실시간으로 가져와 Gemini 멀티모달(Vision)로 분석
+// - Silent Fallback 버그를 완전히 제거하여, 사용자가 입력한 API 키의 상태를 정직하게 반영
 // ============================================================================
 
-// 1. 유튜브 URL에서 비디오 ID를 추출하는 헬퍼 함수
+// 1. 유튜브 URL에서 비디오 ID 추출 함수
 function extractYouTubeVideoId(url: string): string | null {
   try {
     const trimmed = url.trim();
-    // 1) youtu.be/xxxx 형태
     const shortMatch = trimmed.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
     if (shortMatch) return shortMatch[1];
 
-    // 2) youtube.com/shorts/xxxx 형태
     const shortsMatch = trimmed.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
     if (shortsMatch) return shortsMatch[1];
 
-    // 3) youtube.com/watch?v=xxxx 형태
     const parsedUrl = new URL(trimmed);
     const v = parsedUrl.searchParams.get("v");
     if (v && v.length === 11) return v;
 
-    // 4) 임베드 형태 (/embed/xxxx)
     const embedMatch = trimmed.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
     if (embedMatch) return embedMatch[1];
 
@@ -34,7 +30,7 @@ function extractYouTubeVideoId(url: string): string | null {
   }
 }
 
-// 2. 유튜브 공식 oEmbed API를 통해 영상 제목, 작성자, 썸네일 정보 가져오기 (API 키 불필요)
+// 2. 유튜브 공식 oEmbed API 메타데이터 조회
 async function getYouTubeMetadata(url: string) {
   try {
     const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(
@@ -55,12 +51,26 @@ async function getYouTubeMetadata(url: string) {
       thumbnail: data.thumbnail_url || "",
     };
   } catch (error) {
-    console.error("YouTube oEmbed 메타데이터 조회 오류:", error);
+    console.error("YouTube 메타데이터 조회 예외:", error);
     return null;
   }
 }
 
-// 3. 타임스탬프 문자열(예: "01:23")을 초 단위(초) 숫자로 변환하는 함수
+// 3. 유튜브 프레임(썸네일 이미지)을 다운로드하여 base64 문자열로 변환 (Gemini Vision 연동용)
+async function fetchImageAsBase64(imageUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(imageUrl);
+    if (!res.ok) return null;
+    const arrayBuffer = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return buffer.toString("base64");
+  } catch (err) {
+    console.error("썸네일 이미지 base64 변환 실패:", err);
+    return null;
+  }
+}
+
+// 4. 타임스탬프 파싱 헬퍼
 function parseTimestampToSeconds(ts: string): number {
   if (!ts) return 0;
   const parts = ts.split(":").map((p) => parseInt(p.trim(), 10));
@@ -78,13 +88,13 @@ function parseTimestampToSeconds(ts: string): number {
   return 0;
 }
 
-// 4. API 키가 등록되지 않았을 때 제공되는 고품질 데모 시뮬레이션 데이터 생성기
+// 5. API 키가 전혀 등록되지 않은 초보자 체험용 데모 시뮬레이션 데이터
 function generateDemoAnalysis(videoTitle: string, videoId: string) {
   return {
     success: true,
     isDemoMode: true,
     notice:
-      "현재 Gemini API 키가 설정되지 않아 데모 시뮬레이션 결과가 표시됩니다. Cloudflare 대시보드나 .env.local에 GEMINI_API_KEY를 등록하시면 실제 AI 분석으로 즉시 전환됩니다.",
+      "Gemini API 키가 등록되지 않아 데모 시뮬레이션 결과가 표시되었습니다. 상단 [API 키 설정] 메뉴에서 발급받으신 Gemini 키를 등록하시면 실제 영상 속 제품을 실시간 AI로 분석합니다.",
     video: {
       id: videoId,
       title: videoTitle,
@@ -96,12 +106,12 @@ function generateDemoAnalysis(videoTitle: string, videoId: string) {
       {
         id: "prod-1",
         name: "소니 WH-1000XM5 무선 노이즈캔슬링 헤드폰",
-        brand: "SONY (소니)",
+        brand: "SONY",
         category: "전자기기",
         timestamp: "00:15",
         timestampSeconds: 15,
         description:
-          "모던한 무광 실버 마감의 프리미엄 헤드폰. 책상 위에서 착용하는 모습으로 등장합니다.",
+          "모던한 무광 실버 마감의 프리미엄 헤드폰. 영상 초반 책상 위에서 착용하는 모습으로 등장합니다.",
         searchKeywords: {
           naver: "소니 WH-1000XM5",
           coupang: "소니 WH 1000XM5 헤드폰",
@@ -110,8 +120,8 @@ function generateDemoAnalysis(videoTitle: string, videoId: string) {
       },
       {
         id: "prod-2",
-        name: "오버핏 울 블레이저 자켓 (베이지/오트밀)",
-        brand: "코스 (COS 추정)",
+        name: "오버핏 울 블레이저 자켓 (베이지)",
+        brand: "COS (추정)",
         category: "패션/의류",
         timestamp: "00:45",
         timestampSeconds: 45,
@@ -126,53 +136,23 @@ function generateDemoAnalysis(videoTitle: string, videoId: string) {
       {
         id: "prod-3",
         name: "로지텍 MX Master 3S 무소음 무선 마우스",
-        brand: "로지텍 (Logitech)",
+        brand: "Logitech",
         category: "전자기기",
         timestamp: "01:10",
         timestampSeconds: 70,
         description:
-          "인체공학적 디자인의 그라파이트 블랙 마우스. 책상 위 작업 공간에서 확인됩니다.",
+          "인체공학적 디자인의 그라파이트 블랙 마우스. 작업 공간에서 확인됩니다.",
         searchKeywords: {
           naver: "로지텍 MX Master 3S",
           coupang: "로지텍 MX 마스터 3S",
           google: "Logitech MX Master 3S",
         },
       },
-      {
-        id: "prod-4",
-        name: "아르테미데 톨로메오 마이크로 탁상 스탠드 조명",
-        brand: "아르테미데 (Artemide)",
-        category: "인테리어",
-        timestamp: "01:35",
-        timestampSeconds: 95,
-        description:
-          "알루미늄 바디의 세련된 각도 조절형 데스크 램프. 감성적인 공간 무드를 연출합니다.",
-        searchKeywords: {
-          naver: "아르테미데 톨로메오 마이크로 조명",
-          coupang: "아르테미데 조명 톨로메오",
-          google: "Artemide Tolomeo Micro desk lamp",
-        },
-      },
-      {
-        id: "prod-5",
-        name: "스탠리 퀜처 H2.0 플로우스테이트 텀블러 (887ml)",
-        brand: "스탠리 (STANLEY)",
-        category: "생활/소품",
-        timestamp: "02:05",
-        timestampSeconds: 125,
-        description:
-          "크림 화이트 컬러의 손잡이형 대용량 텀블러. 음료를 마시는 장면에 등장합니다.",
-        searchKeywords: {
-          naver: "스탠리 텀블러 퀜처 887ml",
-          coupang: "스탠리 퀜처 887 화이트",
-          google: "Stanley Quencher H2.0 30oz cream",
-        },
-      },
     ],
   };
 }
 
-// 5. POST 요청 처리 (클라이언트에서 영상 URL과 API 키를 전달받음)
+// 6. POST 요청 처리
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -183,7 +163,7 @@ export async function POST(request: Request) {
 
     if (!videoUrl || typeof videoUrl !== "string") {
       return NextResponse.json(
-        { error: "유효한 영상 링크를 입력해 주세요." },
+        { error: "유효한 유튜브 영상 링크를 입력해 주세요." },
         { status: 400 }
       );
     }
@@ -194,26 +174,25 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "지원되는 유튜브 링크 형식이 아닙니다. (일반 영상, 쇼츠 링크를 지원합니다)",
+            "지원되는 유튜브 링크 형식이 아닙니다. (일반 영상 또는 쇼츠 URL을 입력하세요)",
         },
         { status: 400 }
       );
     }
 
-    // 유튜브 기본 정보(제목, 썸네일 등) 획득
+    // 영상 기본 정보 조회
     const metadata = (await getYouTubeMetadata(videoUrl)) || {
       title: "유튜브 영상",
       author: "크리에이터",
       thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
     };
 
-    // API 키 우선순위:
-    // 1순위: 앱 화면에서 사용자가 직접 입력한 키 (clientApiKey)
-    // 2순위: 서버 환경변수에 등록된 키 (GEMINI_API_KEY)
-    const apiKey = (clientApiKey && clientApiKey.trim()) || process.env.GEMINI_API_KEY;
+    // API 키 결정 (1순위: 앱 화면에서 직접 입력한 키, 2순위: 환경변수)
+    const effectiveApiKey =
+      (clientApiKey && clientApiKey.trim()) || process.env.GEMINI_API_KEY;
 
-    // API 키가 어디에도 없을 경우 데모 데이터 반환
-    if (!apiKey) {
+    // 만약 사용자가 API 키를 전혀 입력하지 않은 상태라면 데모 데이터를 제공
+    if (!effectiveApiKey) {
       const demoData = generateDemoAnalysis(metadata.title, videoId);
       demoData.video = {
         ...demoData.video,
@@ -223,26 +202,34 @@ export async function POST(request: Request) {
       return NextResponse.json(demoData);
     }
 
-    // Gemini API 호출 프롬프트 구성 (JSON 형식 강제)
-    const systemPrompt = `
-당신은 영상 속에 등장하는 제품(패션, 전자기기, 인테리어 소품, 화장품 등)을 정밀하게 식별하는 전문 AI 분석가입니다.
-주어진 영상 정보(제목, URL)와 영상 맥락을 바탕으로, 영상에 등장하는 매력적인 제품들을 찾아내어 아래 JSON 형식으로 응답하세요.
+    // ========================================================================
+    // ★ 사용자가 API 키를 등록한 경우: 실제 Gemini AI 멀티모달 비전 분석 실행
+    // ========================================================================
 
-반드시 마크다운 기호 없이 순수 JSON 문자열만 출력하세요:
+    // 1) 고화질 썸네일(영상 프레임) 이미지 다운로드 및 base64 인코딩
+    const primaryImgUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+    const imageBase64 = await fetchImageAsBase64(primaryImgUrl);
+
+    // 2) 시스템 프롬프트 구성 (순수 JSON 강제)
+    const systemPrompt = `
+당신은 영상 속에 등장하는 제품(패션 의류, 전자기기, 인테리어 소품, 뷰티/화장품 등)을 정밀하게 식별하는 제니트리 AI 비전 분석가입니다.
+주어진 영상 프레임 이미지와 메타데이터(제목, 채널)를 면밀히 관찰하여, 화면 속에서 실제로 포착되는 제품들을 찾아내어 아래 JSON 규격으로 응답하세요.
+
+반드시 마크다운 기호 없이 오직 유효한 순수 JSON만 출력하세요:
 {
-  "summary": "영상에 대한 한국어 1~2줄 요약",
+  "summary": "영상에 등장하는 제품들과 전체적인 무드에 대한 한국어 1~2줄 정밀 요약",
   "products": [
     {
       "id": "prod-1",
       "name": "구체적인 제품명",
-      "brand": "브랜드명 (추정 가능할 경우)",
+      "brand": "추정 브랜드명",
       "category": "패션/의류 | 전자기기 | 뷰티/화장품 | 인테리어 | 생활/소품 중 하나",
       "timestamp": "00:15",
-      "description": "제품의 색상, 디자인, 영상 속 등장 장면에 대한 친절한 설명",
+      "description": "제품의 색상, 디자인, 영상 속 위치 및 특징에 대한 상세 설명",
       "searchKeywords": {
-        "naver": "네이버쇼핑 검색용 키워드",
-        "coupang": "쿠팡 검색용 키워드",
-        "google": "구글 검색용 키워드"
+        "naver": "네이버쇼핑 검색 키워드",
+        "coupang": "쿠팡 검색 키워드",
+        "google": "구글 검색 키워드"
       }
     }
   ]
@@ -250,62 +237,109 @@ export async function POST(request: Request) {
 `;
 
     const userMessage = `
-영상 URL: https://www.youtube.com/watch?v=${videoId}
 영상 제목: ${metadata.title}
 채널명: ${metadata.author}
+영상 URL: https://www.youtube.com/watch?v=${videoId}
 
-위 영상에 등장하는 주요 제품들을 3~6개 식별하여 JSON으로 분석해 주세요.
+첨부된 영상 프레임 이미지와 맥락을 종합 분석하여, 실제 등장하는 매력적인 제품들을 3~6개 식별해 주세요.
 `;
 
-    // 표준 fetch를 이용해 Gemini 1.5 Flash API 호출 (Cloudflare 엣지 런타임 호환)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
-    const geminiResponse = await fetch(geminiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: systemPrompt },
-              { text: userMessage },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: "application/json",
+    // 3) 멀티모달 요청 parts 구성 (이미지가 있을 경우 inlineData 포함)
+    const parts: any[] = [{ text: systemPrompt }];
+    if (imageBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: "image/jpeg",
+          data: imageBase64,
         },
-      }),
-    });
-
-    if (!geminiResponse.ok) {
-      const errText = await geminiResponse.text();
-      console.error("Gemini API 응답 오류:", errText);
-      // Gemini API 에러 시에도 사용자 경험을 위해 데모 데이터로 부드럽게 대체
-      const fallbackData = generateDemoAnalysis(metadata.title, videoId);
-      return NextResponse.json({
-        ...fallbackData,
-        notice: "Gemini API 응답 지연으로 대체 분석 결과가 제공되었습니다.",
       });
     }
+    parts.push({ text: userMessage });
 
-    const geminiData = await geminiResponse.json() as any;
+    // 4) Gemini 모델 스마트 폴백 (1.5-flash ➔ 2.0-flash ➔ 1.5-pro)
+    const candidateModels = [
+      "gemini-1.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash-latest",
+      "gemini-1.5-pro",
+    ];
+
+    let lastErrorText = "";
+    let geminiSuccessData: any = null;
+
+    for (const modelName of candidateModels) {
+      try {
+        const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${effectiveApiKey}`;
+
+        const apiRes = await fetch(targetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              temperature: 0.2,
+              responseMimeType: "application/json",
+            },
+          }),
+        });
+
+        if (apiRes.ok) {
+          geminiSuccessData = await apiRes.json();
+          break; // 성공 시 루프 탈출
+        } else {
+          lastErrorText = await apiRes.text();
+          console.warn(`[Gemini API] 모델 ${modelName} 호출 실패:`, lastErrorText);
+        }
+      } catch (callErr: any) {
+        lastErrorText = callErr.message || String(callErr);
+      }
+    }
+
+    // 모든 모델에서 실패한 경우: 사용자가 API 키를 넣었으므로 절대 조용히 숨기지 않고 명확한 에러를 반환
+    if (!geminiSuccessData) {
+      let friendlyMessage = "Google Gemini AI 서버와 통신 중 오류가 발생했습니다.";
+      try {
+        const parsedErr = JSON.parse(lastErrorText);
+        if (parsedErr?.error?.message) {
+          friendlyMessage = `Google API 오류: ${parsedErr.error.message}`;
+        }
+      } catch {
+        if (lastErrorText) friendlyMessage += ` (${lastErrorText.slice(0, 150)})`;
+      }
+
+      return NextResponse.json(
+        {
+          error: `${friendlyMessage} (입력하신 API 키가 올바른지 확인해 주세요)`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // 5) AI 응답 파싱
     const rawContent =
-      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+      geminiSuccessData?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 
     let parsedResult: any;
     try {
       parsedResult = JSON.parse(rawContent);
     } catch {
-      parsedResult = generateDemoAnalysis(metadata.title, videoId);
+      // JSON 파싱 실패 시 정규식 등으로 백업 시도
+      const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsedResult = JSON.parse(jsonMatch[0]);
+      } else {
+        return NextResponse.json(
+          { error: "AI 분석 결과 형식을 해석하지 못했습니다. 다시 시도해 주세요." },
+          { status: 500 }
+        );
+      }
     }
 
-    // 타임스탬프를 초 단위로 환산하여 첨부
+    // 6) 규격화된 제품 데이터 완성
     const refinedProducts = (parsedResult.products || []).map(
       (prod: any, idx: number) => ({
         id: prod.id || `prod-${idx + 1}`,
-        name: prod.name || "제품",
+        name: prod.name || "식별된 제품",
         brand: prod.brand || "브랜드 미상",
         category: prod.category || "생활/소품",
         timestamp: prod.timestamp || "00:00",
@@ -333,7 +367,7 @@ export async function POST(request: Request) {
       products: refinedProducts,
     });
   } catch (error: any) {
-    console.error("API 처리 중 예외 발생:", error);
+    console.error("API 처리 중 중대 예외 발생:", error);
     return NextResponse.json(
       { error: "영상 분석 중 문제가 발생했습니다: " + error.message },
       { status: 500 }

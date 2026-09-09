@@ -62,12 +62,51 @@ export default function VideoProductAnalyzer() {
   const [apiKeySaved, setApiKeySaved] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
 
+  // API 키 즉시 검증 상태
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<{
+    valid: boolean;
+    message: string;
+  } | null>(null);
+
   // 페이지 마운트 시 localStorage에서 저장된 API 키 로드
   useEffect(() => {
     const savedKey = localStorage.getItem("gemini_api_key") || "";
     setApiKey(savedKey);
     setApiKeyInput(savedKey);
   }, []);
+
+  // API 키 유효성 실시간 사전 테스트
+  const handleValidateApiKey = async () => {
+    const trimmed = apiKeyInput.trim();
+    if (!trimmed) {
+      setValidationResult({ valid: false, message: "검증할 API 키를 입력해 주세요." });
+      return;
+    }
+
+    setIsValidating(true);
+    setValidationResult(null);
+
+    try {
+      const res = await fetch("/api/validate-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: trimmed }),
+      });
+      const data = await res.json();
+      setValidationResult({
+        valid: res.ok && data.valid,
+        message: data.message || (res.ok ? "정상 작동하는 키입니다!" : "인증 실패"),
+      });
+    } catch (err: any) {
+      setValidationResult({
+        valid: false,
+        message: "검증 중 네트워크 통신 오류: " + err.message,
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  };
 
   // API 키 저장 핸들러
   const handleSaveApiKey = () => {
@@ -86,6 +125,7 @@ export default function VideoProductAnalyzer() {
     localStorage.removeItem("gemini_api_key");
     setApiKey("");
     setApiKeyInput("");
+    setValidationResult(null);
   };
 
   // 1. 영상 분석 요청 핸들러
@@ -98,12 +138,12 @@ export default function VideoProductAnalyzer() {
 
     setErrorMessage(null);
     setIsLoading(true);
-    setLoadingStep("영상 메타데이터를 정밀 조회하고 있습니다...");
+    setLoadingStep("영상 프레임과 메타데이터를 정밀 조회하고 있습니다...");
 
     try {
       const timer = setTimeout(() => {
-        setLoadingStep("AI 멀티모달 엔진이 영상 속 제품과 시점을 분석하고 있습니다...");
-      }, 1200);
+        setLoadingStep("AI 멀티모달 비전 엔진이 화면 속 제품을 시각적으로 식별 중입니다...");
+      }, 1400);
 
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -214,6 +254,7 @@ export default function VideoProductAnalyzer() {
             <button
               onClick={() => {
                 setApiKeyInput(apiKey);
+                setValidationResult(null);
                 setIsSettingOpen(true);
               }}
               className={`api-setting-btn ${apiKey ? "has-key" : "no-key"}`}
@@ -222,7 +263,7 @@ export default function VideoProductAnalyzer() {
               <span
                 className={`dot-indicator ${apiKey ? "green" : "yellow"}`}
               ></span>
-              {apiKey ? "Gemini API 연동됨" : "API 키 미설정 (데모)"}
+              {apiKey ? "Gemini API 키 등록됨" : "API 키 미설정 (데모)"}
             </button>
             <div className="badge-cloudflare">Cloudflare Pages</div>
           </div>
@@ -246,8 +287,8 @@ export default function VideoProductAnalyzer() {
 
             <div className="modal-body">
               <p className="modal-desc">
-                Google Gemini API 키를 등록하면 실제 영상 속 제품을 실시간 AI 모델로
-                정밀 식별합니다. API 키는 사용자 로컬 브라우저에만 안전하게 저장됩니다.
+                Google Gemini API 키를 등록하시면 실제 영상 속 제품을 실시간 비전 AI 모델로
+                정밀 분석합니다. 키는 본인 브라우저에만 안전하게 보관됩니다.
               </p>
 
               <a
@@ -259,11 +300,15 @@ export default function VideoProductAnalyzer() {
                 Google AI Studio에서 무료 API 키 발급받기 →
               </a>
 
+              {/* API 키 입력창 및 검증 버튼 */}
               <div className="api-input-wrapper">
                 <input
                   type={showApiKey ? "text" : "password"}
                   value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  onChange={(e) => {
+                    setApiKeyInput(e.target.value);
+                    setValidationResult(null);
+                  }}
                   placeholder="AIzaSy... 형태의 API 키를 입력하세요"
                   className="api-key-input"
                 />
@@ -276,6 +321,32 @@ export default function VideoProductAnalyzer() {
                   {showApiKey ? "숨김" : "표시"}
                 </button>
               </div>
+
+              {/* API 키 즉시 테스트 버튼 */}
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button
+                  type="button"
+                  onClick={handleValidateApiKey}
+                  disabled={isValidating || !apiKeyInput.trim()}
+                  className="sample-pill"
+                  style={{ padding: "0.45rem 1rem", fontSize: "0.85rem" }}
+                >
+                  {isValidating ? "키 연결 확인 중..." : "⚡ 키 정상 작동 테스트"}
+                </button>
+              </div>
+
+              {/* 검증 결과 표시 */}
+              {validationResult && (
+                <div
+                  className={
+                    validationResult.valid ? "saved-key-status" : "error-box"
+                  }
+                  style={{ margin: 0, padding: "0.6rem 0.9rem" }}
+                >
+                  {validationResult.valid ? "✅ " : "⚠️ "}
+                  {validationResult.message}
+                </div>
+              )}
 
               {apiKey && (
                 <div className="saved-key-status">
@@ -312,7 +383,7 @@ export default function VideoProductAnalyzer() {
           {!apiKey && (
             <div className="api-warn-banner">
               <span>
-                현재 데모 모드로 작동 중입니다. 정밀 분석을 위해{" "}
+                현재 데모 모드로 작동 중입니다. 실시간 비전 AI 분석을 위해{" "}
                 <button
                   onClick={() => setIsSettingOpen(true)}
                   className="inline-setting-link"
@@ -387,7 +458,7 @@ export default function VideoProductAnalyzer() {
           {/* 에러 발생 시 안내 박스 */}
           {errorMessage && (
             <div className="error-box">
-              <span>{errorMessage}</span>
+              <span>⚠️ {errorMessage}</span>
             </div>
           )}
 

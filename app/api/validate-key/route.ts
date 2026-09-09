@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 // ============================================================================
-// [API 설명] 제미나이 ListModels 기반 실시간 키 검증 및 지원 모델 확인 엔드포인트
+// [API 설명] 제미나이 최신 3.6 Flash / 2.0 Flash 기반 키 검증 엔드포인트
 // ============================================================================
 export async function POST(request: Request) {
   try {
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
 
     const cleanKey = apiKey.trim();
 
-    // 1. Google Gemini ListModels API 호출로 키 유효성 및 실제 지원 모델 목록 획득
+    // 1. Google Gemini ListModels API 호출로 실제 지원 모델 목록 획득
     const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`;
     const listRes = await fetch(listUrl);
 
@@ -37,12 +37,16 @@ export async function POST(request: Request) {
     }
 
     const data = (await listRes.json()) as any;
-    const models: any[] = data?.models || [];
+    const allModels: any[] = data?.models || [];
 
-    // generateContent를 지원하는 모델 필터링
-    const contentModels = models.filter((m) =>
-      m?.supportedGenerationMethods?.includes("generateContent")
-    );
+    // generateContent를 지원하고, 지원 중단된 2.5-flash는 제외
+    const contentModels = allModels.filter((m) => {
+      const name = m?.name?.toLowerCase() || "";
+      const isGenerateSupported =
+        m?.supportedGenerationMethods?.includes("generateContent");
+      const isDeprecated = name.includes("2.5-flash");
+      return isGenerateSupported && !isDeprecated;
+    });
 
     if (contentModels.length === 0) {
       return NextResponse.json(
@@ -54,14 +58,19 @@ export async function POST(request: Request) {
       );
     }
 
-    // 우선순위 키워드로 최적 모델 이름 추출
+    // 최신 Gemini 3.6 Flash 우선순위 키워드
     const priorityKeywords = [
-      "2.5-flash",
+      "3.6-flash",
+      "3.5-flash",
+      "3.0-flash",
+      "3-flash",
+      "gemini-3",
+      "3.6-pro",
+      "3.0-pro",
       "2.0-flash",
       "1.5-flash",
       "flash",
-      "2.5-pro",
-      "1.5-pro",
+      "pro",
     ];
 
     let chosenModelName = contentModels[0].displayName || contentModels[0].name;
@@ -79,7 +88,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       valid: true,
       model: chosenModelName,
-      message: `키가 정상 인증되었습니다! (${chosenModelName} 엔진 활성화)`,
+      message: `키가 정상 인증되었습니다! (최신 ${chosenModelName} 엔진 활성화)`,
     });
   } catch (err: any) {
     return NextResponse.json(

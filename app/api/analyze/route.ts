@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 
 // ============================================================================
 // [API 설명] 제니트리 JT_ProductLens 영상 제품 분석 백엔드 엔드포인트
-// - 구글 ModelService.ListModels를 실시간 조회하여 사용자의 API 키에서 지원하는
-//   실제 모델명(models/...)을 100% 정확하게 동적 탐색하여 호출 (Model Not Found 완전 방지)
-// - 유튜브 영상 고화질 프레임 썸네일을 base64 멀티모달(Vision)로 전달하여 정밀 판독
+// - 구글 권장 최신 플래그십 모델 Gemini 3.6 Flash 우선 탑재
+// - 신규 지원이 중단된 gemini-2.5-flash 자동 제외 및 ListModels 기반 실시간 매칭
+// - 유튜브 고화질 프레임 썸네일을 base64 멀티모달(Vision)로 전달하여 정밀 판독
 // - 클라우드플레어(Cloudflare) 엣지 환경과 100% 호환
 // ============================================================================
 
@@ -89,10 +89,9 @@ function parseTimestampToSeconds(ts: string): number {
   return 0;
 }
 
-// 5. 구글 ListModels API를 호출하여 현재 API 키에서 실제 지원하는 최적의 모델 경로 조회
-async function resolveOptimalModel(apiKey: string): Promise<{
-  modelPath: string;
-  displayName: string;
+// 5. 사용 가능한 후보 모델 목록을 우선순위대로 반환 (구글 권장 3.6 Flash 최우선)
+async function getCandidateModels(apiKey: string): Promise<{
+  models: { modelPath: string; displayName: string }[];
   error?: string;
 }> {
   try {
@@ -106,59 +105,89 @@ async function resolveOptimalModel(apiKey: string): Promise<{
         const parsed = JSON.parse(errText);
         if (parsed?.error?.message) msg = parsed.error.message;
       } catch {}
-      return { modelPath: "", displayName: "", error: msg };
+      return { models: [], error: msg };
     }
 
     const data = (await listRes.json()) as any;
-    const models: any[] = data?.models || [];
+    const allModels: any[] = data?.models || [];
 
-    // generateContent를 지원하는 유효한 모델들 필터링
-    const contentModels = models.filter((m) =>
-      m?.supportedGenerationMethods?.includes("generateContent")
-    );
+    // 1) generateContent를 지원하고, 지원 중단된 2.5-flash는 제외
+    const contentModels = allModels.filter((m) => {
+      const name = m?.name?.toLowerCase() || "";
+      const isGenerateSupported =
+        m?.supportedGenerationMethods?.includes("generateContent");
+      // 구글 권고: 2.5-flash는 신규 지원 중단되었으므로 제외
+      const isDeprecated = name.includes("2.5-flash");
+      return isGenerateSupported && !isDeprecated;
+    });
 
     if (contentModels.length === 0) {
+      // 2.5-flash 제외 후 모델이 없다면 전체 생성 모델로 완화
+      const anyContent = allModels.filter((m) =>
+        m?.supportedGenerationMethods?.includes("generateContent")
+      );
+      if (anyContent.length === 0) {
+        return {
+          models: [],
+          error: "해당 API 키에서 콘텐츠 생성을 지원하는 모델을 찾을 수 없습니다.",
+        };
+      }
       return {
-        modelPath: "",
-        displayName: "",
-        error: "해당 API 키에서 콘텐츠 생성을 지원하는 모델을 찾을 수 없습니다.",
+        models: anyContent.map((m) => ({
+          modelPath: m.name,
+          displayName: m.displayName || m.name,
+        })),
       };
     }
 
-    // 우선순위 키워드 순으로 가장 우수한 최신 플래시 모델 선택
+    // 2) 최신 Gemini 3.6 Flash 우선순위 키워드 정렬
     const priorityKeywords = [
-      "2.5-flash",
+      "3.6-flash",
+      "3.5-flash",
+      "3.0-flash",
+      "3-flash",
+      "gemini-3",
+      "3.6-pro",
+      "3.0-pro",
       "2.0-flash",
       "1.5-flash",
       "flash",
-      "2.5-pro",
-      "1.5-pro",
       "pro",
     ];
 
+    const sorted: { modelPath: string; displayName: string }[] = [];
+    const usedPaths = new Set<string>();
+
     for (const kw of priorityKeywords) {
-      const matched = contentModels.find((m) =>
-        m.name?.toLowerCase().includes(kw)
-      );
-      if (matched) {
-        return {
-          modelPath: matched.name, // 예: "models/gemini-1.5-flash"
-          displayName: matched.displayName || matched.name,
-        };
+      for (const m of contentModels) {
+        if (m.name?.toLowerCase().includes(kw) && !usedPaths.has(m.name)) {
+          sorted.push({
+            modelPath: m.name,
+            displayName: m.displayName || m.name,
+          });
+          usedPaths.add(m.name);
+        }
       }
     }
 
-    // 우선순위에 정확히 안 걸려도 사용 가능한 첫 번째 생성 모델 선택
-    return {
-      modelPath: contentModels[0].name,
-      displayName: contentModels[0].displayName || contentModels[0].name,
-    };
+    // 남은 모델들도 추가
+    for (const m of contentModels) {
+      if (!usedPaths.has(m.name)) {
+        sorted.push({
+          modelPath: m.name,
+          displayName: m.displayName || m.name,
+        });
+        usedPaths.add(m.name);
+      }
+    }
+
+    return { models: sorted };
   } catch (err: any) {
-    return { modelPath: "", displayName: "", error: err.message };
+    return { models: [], error: err.message };
   }
 }
 
-// 6. API 키가 전혀 등록되지 않은 초보자 체험용 데모 시뮬레이션 데이터
+// 6. 데모 시뮬레이션 데이터
 function generateDemoAnalysis(videoTitle: string, videoId: string) {
   return {
     success: true,
@@ -242,11 +271,10 @@ export async function POST(request: Request) {
       thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
     };
 
-    // API 키 결정 (1순위: 앱 화면에서 직접 입력한 키, 2순위: 환경변수)
+    // API 키 결정
     const effectiveApiKey =
       (clientApiKey && clientApiKey.trim()) || process.env.GEMINI_API_KEY;
 
-    // 만약 사용자가 API 키를 전혀 입력하지 않은 상태라면 데모 데이터를 제공
     if (!effectiveApiKey) {
       const demoData = generateDemoAnalysis(metadata.title, videoId);
       demoData.video = {
@@ -258,22 +286,17 @@ export async function POST(request: Request) {
     }
 
     // ========================================================================
-    // ★ 1단계: 구글 ListModels를 통해 남건의 계정에서 실제 사용 가능한 최신 모델 동적 해결
+    // ★ 1단계: 구글 권장 Gemini 3.6 Flash 우선 후보 모델 목록 획득
     // ========================================================================
-    const resolved = await resolveOptimalModel(effectiveApiKey);
-    if (resolved.error || !resolved.modelPath) {
+    const candidateResult = await getCandidateModels(effectiveApiKey);
+    if (candidateResult.error || candidateResult.models.length === 0) {
       return NextResponse.json(
         {
-          error: `Google API 오류: ${resolved.error || "사용 가능한 모델이 없습니다."} (API 키를 다시 확인해 주세요)`,
+          error: `Google API 오류: ${candidateResult.error || "사용 가능한 모델이 없습니다."} (API 키를 다시 확인해 주세요)`,
         },
         { status: 400 }
       );
     }
-
-    // modelPath는 "models/gemini-1.5-flash" 등의 형태
-    const targetModelPath = resolved.modelPath.startsWith("models/")
-      ? resolved.modelPath
-      : `models/${resolved.modelPath}`;
 
     // ========================================================================
     // ★ 2단계: 실제 영상 프레임 썸네일 이미지 다운로드 (Vision 멀티모달)
@@ -282,7 +305,7 @@ export async function POST(request: Request) {
     const imageBase64 = await fetchImageAsBase64(primaryImgUrl);
 
     // ========================================================================
-    // ★ 3단계: 프롬프트 구성 및 실시간 생성 요청
+    // ★ 3단계: 시스템 및 유저 프롬프트 구성
     // ========================================================================
     const systemPrompt = `
 당신은 영상 속에 등장하는 제품(패션 의류, 전자기기, 인테리어 소품, 뷰티/화장품 등)을 정밀하게 식별하는 제니트리 AI 비전 분석가입니다.
@@ -328,31 +351,63 @@ export async function POST(request: Request) {
     }
     parts.push({ text: userMessage });
 
-    const generateUrl = `https://generativelanguage.googleapis.com/v1beta/${targetModelPath}:generateContent?key=${effectiveApiKey}`;
+    // ========================================================================
+    // ★ 4단계: 후보 모델 순차 호출 (3.6-flash부터 성공할 때까지 안전 실행)
+    // ========================================================================
+    let lastErrorMsg = "";
+    let geminiData: any = null;
+    let successfulModelDisplayName = "";
 
-    const generateRes = await fetch(generateUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: "application/json",
-        },
-      }),
-    });
+    for (const modelItem of candidateResult.models) {
+      const modelPath = modelItem.modelPath.startsWith("models/")
+        ? modelItem.modelPath
+        : `models/${modelItem.modelPath}`;
 
-    if (!generateRes.ok) {
-      const errText = await generateRes.text();
-      let errorMsg = `Google API 오류 (${generateRes.status})`;
+      const generateUrl = `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${effectiveApiKey}`;
+
       try {
-        const parsed = JSON.parse(errText);
-        if (parsed?.error?.message) errorMsg = `Google API 오류: ${parsed.error.message}`;
-      } catch {}
-      return NextResponse.json({ error: errorMsg }, { status: 400 });
+        const generateRes = await fetch(generateUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              temperature: 0.2,
+              responseMimeType: "application/json",
+            },
+          }),
+        });
+
+        if (generateRes.ok) {
+          geminiData = await generateRes.json();
+          successfulModelDisplayName =
+            modelItem.displayName || modelPath.replace("models/", "");
+          break; // 성공 시 루프 탈출
+        } else {
+          const errText = await generateRes.text();
+          try {
+            const parsed = JSON.parse(errText);
+            lastErrorMsg = parsed?.error?.message || errText;
+          } catch {
+            lastErrorMsg = errText;
+          }
+          console.warn(`[Gemini] ${modelPath} 호출 실패:`, lastErrorMsg);
+        }
+      } catch (callErr: any) {
+        lastErrorMsg = callErr.message || String(callErr);
+      }
     }
 
-    const geminiData = (await generateRes.json()) as any;
+    if (!geminiData) {
+      return NextResponse.json(
+        {
+          error: `Google API 오류: ${lastErrorMsg || "모든 모델 호출에 실패했습니다."}`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // 5) AI 응답 파싱
     const rawContent =
       geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 
@@ -392,7 +447,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       isDemoMode: false,
-      aiModel: resolved.displayName || targetModelPath.replace("models/", ""),
+      aiModel: successfulModelDisplayName,
       video: {
         id: videoId,
         title: metadata.title,
